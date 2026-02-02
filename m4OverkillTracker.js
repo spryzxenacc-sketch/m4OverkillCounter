@@ -19,6 +19,7 @@ let lastBlockState = null;
 const CONFIRM_MIN_MS = 80;
 const CONFIRM_MAX_MS = 900;
 const LOST_WINDOW_MS = 1000;
+const SCAN_MIN_MS = 50;
 
 // counts (per phase)
 let totalOverkills = 0;
@@ -69,6 +70,14 @@ function hasZeroHeart(name) {
   return /§e0§c❤$/.test(name);
 }
 
+function getMobTypeFromName(name) {
+  const plain = stripMcColors(name).toLowerCase();
+  for (const key in animalsMap) {
+    if (plain.includes(key)) return animalsMap[key];
+  }
+  return null;
+}
+
 // --- Your proven matching approach ---
 const animalsMap = {
   "spirit bat": "Bat",
@@ -78,11 +87,11 @@ const animalsMap = {
   "spirit sheep": "Sheep",
   "spirit chicken": "Chicken",
 };
-const animalsRegex = new RegExp(Object.keys(animalsMap).join("|"), "i");
 
 // tracked entities keyed by entityId
 // id -> { mobType, lastSeenMs, deathSeenMs }
 let tracked = {};
+let lastScanMs = 0;
 
 // ring coords (for /m4test killcount)
 const ringCoordList = [
@@ -141,10 +150,13 @@ register("tick", () => {
 // ------------------------------------------
 // Main scan loop (packetReceived like yours)
 // ------------------------------------------
-register("packetReceived", () => {
+function scanEntities() {
   if (!modEnabled) return;
 
   const now = Date.now();
+  if (now - lastScanMs < SCAN_MIN_MS) return;
+  lastScanMs = now;
+
   const entities = World.getAllEntities() || [];
   const seen = new Set();
 
@@ -158,13 +170,9 @@ register("packetReceived", () => {
     if (!name) continue;
 
     const plainName = stripMcColors(name).toLowerCase();
-    const match = plainName.match(animalsRegex);
-    if (!match) continue;
-
-    // exclude Spirit Bear always
     if (/spirit bear/i.test(plainName)) continue;
 
-    const mobType = animalsMap[match[0].toLowerCase()];
+    const mobType = getMobTypeFromName(name);
     if (!mobType) continue;
 
     matchedSpirit++;
@@ -214,7 +222,11 @@ register("packetReceived", () => {
   if (debugEnabled) {
     dbg(`scan: entities=${entities.length} matchedSpirit=${matchedSpirit} deadTailSeen=${sawDeadTail} trackedNow=${Object.keys(tracked).length} cap=${capReached}`);
   }
-}).setPacketClass(net.minecraft.network.play.server.S32PacketConfirmTransaction);
+}
+
+register("tick", scanEntities);
+register("packetReceived", scanEntities)
+  .setPacketClass(net.minecraft.network.play.server.S32PacketConfirmTransaction);
 
 // -----------------------
 // Commands
